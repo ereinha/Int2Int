@@ -30,11 +30,18 @@ class Sequence(Generator):
         self.dims = dims
         self.modulus = params.modulus
 
-        
+    # integers from 1 to maxint, log uniform distribution
+    def integer_loguniform_sequence(self, len, rng, type=None, max=None):
+        maxint = self.maxint if max is None else max
+        lgs = math.log10(maxint)*rng.rand(len)
+        return np.int64(10 ** lgs)
+
+    # integers from minint to maxint, uniform distribution
     def integer_sequence(self, len, rng, type=None, max=None):
         maxint = self.maxint if max is None else max
         return rng.randint(self. minint, maxint + 1, len)
 
+    # integer (n,p) matrix, uniformly distributed coefficients between -maxint and maxint 
     def integer_matrix(self, n, p, rng):
         maxint = (int)(self.maxint + 0.5)
         return rng.randint(- maxint, maxint + 1, (n, p))
@@ -98,4 +105,6 @@ class Sequence(Generator):
         return None
 
     def evaluate(self, src, tgt, hyp):
-        return 0, 0, 0, 0
+                        
+        return 0, [],[]
+

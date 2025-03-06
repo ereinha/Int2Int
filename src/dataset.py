@@ -187,7 +187,7 @@ class EnvDataset(Dataset):
                 f"(base seed={self.env_base_seed})."
             )
         else:
-            self.env.rng = np.random.RandomState(None if self.type == "valid" else 0)
+            self.env.rng = np.random.RandomState(None)
 
     def get_worker_id(self):
         """

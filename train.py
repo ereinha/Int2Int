@@ -42,11 +42,17 @@ def get_parser():
     parser.add_argument("--exp_id", type=str, default="",
                         help="Experiment ID")
 
-    # float16 / AMP API
-    parser.add_argument("--fp16", type=bool_flag, default=False,
-                        help="Run model with float16")
-    parser.add_argument("--amp", type=int, default=-1,
-                        help="Use AMP wrapper for float16 / distributed / gradient accumulation. Level of optimization. -1 to disable.")
+    parser.add_argument("--report_loss_every", type=int, default=200,
+                        help="Log train loss every n optimisation steps")
+    
+    parser.add_argument("--epoch_size", type=int, default=300000,
+                        help="Epoch size / evaluation frequency")
+    parser.add_argument("--max_epoch", type=int, default=100000,
+                        help="Maximum epoch size")
+    parser.add_argument("--stopping_criterion", type=str, default="",
+                        help="Stopping criterion, and number of non-increase before stopping the experiment")
+    parser.add_argument("--validation_metrics", type=str, default="",
+                        help="Validation metrics")
 
     # model parameters
     parser.add_argument("--enc_emb_dim", type=int, default=256,
@@ -61,27 +67,53 @@ def get_parser():
                         help="Number of Transformer encoder heads")
     parser.add_argument("--n_dec_heads", type=int, default=8,
                         help="Number of Transformer decoder heads")
+    parser.add_argument("--xav_init", type=bool_flag, default=False,
+                        help="Xavier initialization for transformer parameters")
+    
+
     parser.add_argument("--n_enc_hidden_layers", type=int, default=1,
                         help="Number of FFN layers in Transformer encoder")
     parser.add_argument("--n_dec_hidden_layers", type=int, default=1,
                         help="Number of FFN layers in Transformer decoder")
-    parser.add_argument("--xav_init", type=bool_flag, default=False,
-                        help="Xavier initialization for transformer parameters")
     parser.add_argument("--gelu_activation", type=bool_flag, default=False,
                         help="GELU initialization in FFN layers (else RELU)")
+    parser.add_argument("--dropout", type=float, default=0,
+                        help="Dropout")
+    
     parser.add_argument("--max_src_len", type=int, default=0,
                         help="Maximum number of tokens to consider in encoder output")
 
     parser.add_argument("--norm_attention", type=bool_flag, default=False,
                         help="Normalize attention and train temperaturee in Transformer")
-    parser.add_argument("--dropout", type=float, default=0,
-                        help="Dropout")
     parser.add_argument("--attention_dropout", type=float, default=0,
                         help="Dropout in the attention layer")
+
+    parser.add_argument("--architecture", type=str, default="encoder_decoder",
+                        help="encoder_decoder, encoder_only or decoder_only (last 2 transformer only)")
+
+    # lstm/GRU
+    parser.add_argument("--lstm", type=bool_flag, default=False,
+                        help="LSTM or GRU")
+    parser.add_argument("--GRU", type=bool_flag, default=False,
+                        help="GRU model")
+    parser.add_argument("--bidirectional", type=bool_flag, default=False,
+                        help="bidirectional lstm")
+    parser.add_argument("--lstm_hidden_dim", type=int, default=2048,
+                        help="hidden dimension for lstm")
+
+    # embedding
     parser.add_argument("--share_inout_emb", type=bool_flag, default=True,
                         help="Share input and output embeddings")
     parser.add_argument("--sinusoidal_embeddings", type=bool_flag, default=False,
                         help="Use sinusoidal embeddings")
+
+    parser.add_argument("--enc_has_pos_emb", type=bool_flag, default=True,
+                        help="Positional embedding in the encoder")
+    parser.add_argument("--dec_has_pos_emb", type=bool_flag, default=True,
+                        help="Positional embedding in the decoder")
+
+
+
     # Loop layers
     parser.add_argument("--enc_loop_idx", type=int, default=-1,
                         help="Index of the encoder shared weight layers (-1 for none, -2 for all)")
@@ -92,11 +124,7 @@ def get_parser():
     parser.add_argument("--dec_loops", type=int, default=1,
                         help="Fixed/max nr of train passes through the decoder loop")
 
-    parser.add_argument("--enc_has_pos_emb", type=bool_flag, default=True,
-                        help="Positional embedding in the encoder")
-    parser.add_argument("--dec_has_pos_emb", type=bool_flag, default=True,
-                        help="Positional embedding in the decoder")
-
+    
     # gates
     parser.add_argument("--gated", type=bool_flag, default=False,
                         help="Gated loop layers")
@@ -124,49 +152,53 @@ def get_parser():
     parser.add_argument("--act_bias", type=int, default=0,
                         help="act bias")
 
-    parser.add_argument("--architecture", type=str, default="encoder_decoder",
-                        help="encoder_decoder, encoder_only or decoder_only (last 2 transformer only)")
 
-    # lstm/GRU
-    parser.add_argument("--lstm", type=bool_flag, default=False,
-                        help="LSTM or GRU")
-    parser.add_argument("--GRU", type=bool_flag, default=False,
-                        help="GRU model")
-    parser.add_argument("--bidirectional", type=bool_flag, default=False,
-                        help="bidirectional lstm")
-    parser.add_argument("--lstm_hidden_dim", type=int, default=2048,
-                        help="hidden dimension for lstm")
 
-    # training parameters
+    # technical parameters  float16 / AMP API
+    parser.add_argument("--fp16", type=bool_flag, default=False,
+                        help="Run model with float16")
+    parser.add_argument("--amp", type=int, default=-1,
+                        help="Use AMP wrapper for float16 / distributed / gradient accumulation. Level of optimization. -1 to disable.")
+    parser.add_argument("--num_workers", type=int, default=1,
+                        help="Number of CPU workers for DataLoader")
     parser.add_argument("--env_base_seed", type=int, default=-1,
                         help="Base seed for environments (-1 to use timestamp seed)")
+
+# CPU / multi-gpu / multi-node
+    parser.add_argument("--cpu", type=bool_flag, default=False,
+                        help="Run on CPU")
+    parser.add_argument("--local_gpu", type=int, default=-1,
+                        help="Multi-GPU - Local GPU")
+    parser.add_argument("--local_rank", type=int, default=-1,
+                        help="Multi-GPU - Local rank for torch.distributed.launch")
+    parser.add_argument("--master_port", type=int, default=-1,
+                        help="Master port (for multi-node SLURM jobs)")
+    # parser.add_argument("--windows", type=bool_flag, default=False,
+    #                     help="Windows version (no multiprocessing for eval)")
+
+
+
+    # training parameters
+
     parser.add_argument("--max_len", type=int, default=512,
                         help="Maximum sequences length")
     parser.add_argument("--max_output_len", type=int, default=512,
                         help="max length of output, beam max size")
 
-    parser.add_argument("--batch_size", type=int, default=32,
-                        help="Number of sentences per batch")
     parser.add_argument("--eval_size", type=int, default=10000,
                         help="Size of valid and test samples")
     parser.add_argument("--batch_size_eval", type=int, default=128,
                         help="Number of sentences per batch during evaluation")
+
+
+    parser.add_argument("--batch_size", type=int, default=32,
+                        help="Number of sentences per batch")
+    parser.add_argument("--accumulate_gradients", type=int, default=1,
+                        help="Accumulate model gradients over N iterations (N times larger batch sizes)")
     parser.add_argument("--optimizer", type=str, default="adam,lr=0.0001",
                         help="Optimizer (SGD / RMSprop / Adam, etc.)")
     parser.add_argument("--clip_grad_norm", type=float, default=5,
                         help="Clip gradients norm (0 to disable)")
-    parser.add_argument("--epoch_size", type=int, default=300000,
-                        help="Epoch size / evaluation frequency")
-    parser.add_argument("--max_epoch", type=int, default=100000,
-                        help="Maximum epoch size")
-    parser.add_argument("--stopping_criterion", type=str, default="",
-                        help="Stopping criterion, and number of non-increase before stopping the experiment")
-    parser.add_argument("--validation_metrics", type=str, default="",
-                        help="Validation metrics")
-    parser.add_argument("--accumulate_gradients", type=int, default=1,
-                        help="Accumulate model gradients over N iterations (N times larger batch sizes)")
-    parser.add_argument("--num_workers", type=int, default=10,
-                        help="Number of CPU workers for DataLoader")
 
     # export data / reload it
     parser.add_argument("--export_data", type=bool_flag, default=False,
@@ -224,18 +256,7 @@ def get_parser():
     parser.add_argument("--debug", help="Enable all debug flags",
                         action="store_true")
 
-    # CPU / multi-gpu / multi-node
-    parser.add_argument("--cpu", type=bool_flag, default=False,
-                        help="Run on CPU")
-    parser.add_argument("--local_gpu", type=int, default=-1,
-                        help="Multi-GPU - Local GPU")
-    parser.add_argument("--local_rank", type=int, default=-1,
-                        help="Multi-GPU - Local rank for torch.distributed.launch")
-    parser.add_argument("--master_port", type=int, default=-1,
-                        help="Master port (for multi-node SLURM jobs)")
-    parser.add_argument("--windows", type=bool_flag, default=False,
-                        help="Windows version (no multiprocessing for eval)")
-
+    
     return parser
 
 
@@ -326,6 +347,8 @@ if __name__ == '__main__':
 
         params.eval_only = True
         params.reload_model = params.eval_from_exp + '/best-' + params.validation_metrics + '.pth'
+        if not os.path.isfile(params.reload_model):
+            params.reload_model = params.eval_from_exp + '/checkpoint.pth'
         params.eval_size = None
         params.train_data = ""
         params.is_slurm_job = False

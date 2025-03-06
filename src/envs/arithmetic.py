@@ -71,33 +71,41 @@ class ArithmeticEnvironment(object):
         self.operation = params.operation
         
         self.base = params.base
-        self.class_by_length = params.class_by_length
         self.max_class = params.max_class
 
-        if self.operation == 'data':
-            assert params.data_types, "argument --data_types is required"
-            i, o = params.data_types.split(':')
-            self.input_encoder = data_type_to_encoder(params, i)
-            self.output_encoder = data_type_to_encoder(params, o)
-        else:
-            if self.operation == 'matrix_rank':
-                dims = [params.dim1, params.dim2]
-                max_dim = 100
-                tensor_dim = 2
-                self.output_encoder = encoders.SymbolicInts(1, max_dim)
-            else:
-                dims = []
-                max_dim =  4 if self.operation in ["fraction_compare", "fraction_determinant", "fraction_add", "fraction_product"] else 2
-                tensor_dim =  1
-                if self.operation in  ["fraction_add", "fraction_product", "fraction_simplify"]:
-                    self.output_encoder = encoders.NumberArray(params, 2, 'V', tensor_dim )
-                elif self.operation in ["fraction_round", "gcd", "fraction_determinant","modular_add","modular_mul","elliptic"]:
-                    self.output_encoder = encoders.PositionalInts(params.base)
-                else:
-                    self.output_encoder = encoders.SymbolicInts(0, 1)
-            self.input_encoder = encoders.NumberArray(params, max_dim, 'V', tensor_dim)
+        #if self.operation == 'data':
+            #assert params.data_types, "argument --data_types is required"
+            #i, o = params.data_types.split(':')
+            #self.input_encoder = data_type_to_encoder(params, i)
+            #self.output_encoder = data_type_to_encoder(params, o)
+        #    self.input_encoder = encoders.NumberArray(params, 5, 'V', 1)
+        #    self.output_encoder = encoders.SymbolicInts(0, 10)
+        #    dims=[]
+        #    self.generator = generators.Sequence(params, dims)
+        self.export_pred = params.export_pred
+        self.n_eval_metrics = params.n_eval_metrics
+        self.n_error_metrics = params.n_error_metrics
 
-            self.generator = generators.Sequence(params, dims)
+
+        if self.operation == 'matrix_rank':
+            dims = [params.dim1, params.dim2]
+            max_dim = 100
+            tensor_dim = 2
+            self.output_encoder = encoders.SymbolicInts(1, max_dim)
+        else:
+            dims = []
+            max_dim =  4 if self.operation in ["fraction_compare", "fraction_determinant", "fraction_add", "fraction_product"] else 2
+            tensor_dim =  1
+            if self.operation in  ["fraction_add", "fraction_product", "fraction_simplify"]:
+                self.output_encoder = encoders.NumberArray(params, 2, 'V', tensor_dim )
+            elif self.operation in ["fraction_round", "gcd", "fraction_determinant","modular_add","modular_mul","elliptic"]:
+                self.output_encoder = encoders.PositionalInts(params.base)
+            else:
+                self.output_encoder = encoders.SymbolicInts(0, 1)
+        self.input_encoder = encoders.NumberArray(params, max_dim, 'V', tensor_dim)
+        assert not self.export_pred or isinstance(self.output_encoder, (encoders.SymbolicInts, encoders.PositionalInts))
+
+        self.generator = generators.Sequence(params, dims)
 
         # vocabulary
         self.words = SPECIAL_WORDS + sorted(list(
@@ -116,10 +124,10 @@ class ArithmeticEnvironment(object):
         logger.info(f"words: {self.word2id}")
 
     def input_to_infix(self, lst):
-        return ''.join(lst)
+        return ' '.join(lst)
         
     def output_to_infix(self, lst):
-        return ''.join(lst)
+        return ' '.join(lst)
         
     def gen_expr(self, data_type=None):
         """
@@ -151,24 +159,24 @@ class ArithmeticEnvironment(object):
         The code class splits the test data in to subgroups by code_class
         This is passed to the evaluator, so it needs to be an integer
         """
+        if self.export_pred:
+            v = self.output_encoder.decode(yi)
+            assert v is not None
+            if v >= self.max_class:
+                v = self.max_class
+            return v
+
         if self.operation in ["fraction_add", "fraction_product", "fraction_simplify", "fraction_round", "fraction_determinant"]:
             return 0
         elif self.operation in ["gcd", "modular_add", "modular_mul"]:
-            if self.class_by_length:
-                x = self.input_encoder.decode(xi)
-                top = np.int_(np.max(np.log10(x)))
-            else:
-                top = 0
             v = self.output_encoder.decode(yi)
-            if v is None:
-                return 0
+            assert v is not None
             if v >= self.max_class:
                 v = self.max_class
-            return 1000*top + v
+            return v
         else:
             v = self.output_encoder.decode(yi)
-            if v is None:
-                return -1
+            assert v is not None
             if isinstance(self.output_encoder, encoders.NumberArray):
                 v = v[0]
             return v % self.max_class
@@ -176,24 +184,15 @@ class ArithmeticEnvironment(object):
     def check_prediction(self, src, tgt, hyp):
         w = self.output_encoder.decode(hyp)
         if w is None:
-            return 0,0,0,0
-        if hasattr(w, "__len__"):
-            w = w[0]
+            return -1,[],[], None if self.export_pred else -1,[],[]
         if len(hyp) == 0 or len(tgt) == 0:
-            return 0, 0, 0, w
+            return -1,[],[], None if self.export_pred else -1,[],[]
         if hyp == tgt:
-            return 1, 1, 1, w
-        if self.operation == "fraction_determinant":
-            s = self.input_encoder.decode(src)
-            if s is None or len(s) != 4:
-                return 0,0,0,w
-            a,b,c,d = s
-            res = abs(a*d-b*c-w)
-            r1 = 1 if res < 1000000 else 0
-            r2 = 1 if res < 10000 else 0
-            return 0,r1,r2,w
-                        
-        return 0, 0, 0, w
+            return 2,[],[], w if self.export_pred else 2,[],[]
+
+        a, b, c = self.generator.evaluate(self.input_encoder.decode(src), self.input_encoder.decode(tgt), w)
+        return a, b, c, w if self.export_pred else a, b, c
+
 
     def create_train_iterator(self, task, data_path, params):
         """
@@ -228,19 +227,22 @@ class ArithmeticEnvironment(object):
         """
         Create a dataset for this environment.
         """
-        assert data_type in ["valid", "test"]
+        #assert data_type in ["valid", "test"] or data_type[:4] == "test"
         logger.info(f"Creating {data_type} iterator for {task} ...")
-
+        if data_path is None:
+            path_iter = None
+        elif data_type == "valid":
+            path_iter = data_path[0]
+        elif data_type == "test":
+            path_iter = data_path[1]
+        else: 
+            path_iter = data_path[int(data_type[4:])]
         dataset = EnvDataset(
             self,
             task,
             train=False,
             params=params,
-            path=(
-                None
-                if data_path is None
-                else data_path[0 if data_type == "valid" else 1]
-            ),
+            path=path_iter,
             size=size,
             type=data_type,
         )
@@ -280,13 +282,7 @@ class ArithmeticEnvironment(object):
         )
         
 
-        parser.add_argument(
-            "--class_by_length", type=bool_flag, default=False, help="Compute accuracy by powers of ten"
-        )
-      
-        parser.add_argument(
-            "--max_class", type=int, default=101, help="Maximum class for reporting"
-        )
+
         parser.add_argument(
             "--two_classes", type=bool_flag, default=False, help="Two classes in train set"
         )
@@ -302,5 +298,18 @@ class ArithmeticEnvironment(object):
         )
         parser.add_argument(
             "--modulus", type=int, default=67, help="Modulus for modular operations"
+        )
+
+        parser.add_argument(
+            "--n_eval_metrics", type=int, default=0, help="number of eval metrics, returned by generator.evaluate()")
+
+        parser.add_argument(
+            "--n_error_metrics", type=int, default=0, help="number of error metrics, returned by generator.evaluate()")
+
+        parser.add_argument(
+            "--export_pred", type=bool_flag, default=False, help="export model predictions, returned by check_predictions()")
+      
+        parser.add_argument(
+            "--max_class", type=int, default=101, help="Maximum class for reporting with error predictions"
         )
 

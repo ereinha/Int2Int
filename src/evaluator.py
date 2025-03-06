@@ -39,17 +39,34 @@ def check_hypothesis(eq):
     eq["src"] = env.input_to_infix(src)
     eq["tgt"] = tgt
     eq["hyp"] = hyp
-    try:
-        m, s1, s2, nb = env.check_prediction(src, tgt, hyp)
-    except Exception:
-        m = 0
-        s1 = 0
-        s2 = 0
-        nb = 0
+    if env.export_pred:
+        try:
+            m, s1, s2, nb = env.check_prediction(src, tgt, hyp)
+        except Exception:
+            m = -1
+            s1 = []
+            s2 = []
+            nb = None
+    else: 
+        try:
+            m, s1, s2 = env.check_prediction(src, tgt, hyp)
+        except Exception:
+            m = -1
+            s1 = []
+            s2 = []
     eq["is_valid"] = m
-    eq["is_valid2"] = s1
-    eq["is_valid3"] = s2
-    eq["is_valid4"] = nb if not nb is None else 0
+    for i in range(env.n_eval_metrics):
+        if m == 2:
+            eq[f"is_valid{i+1}"] = 1
+        elif m < 0:
+            eq[f"is_valid{i+1}"] = 0
+        else:
+            eq[f"is_valid{i+1}"] = s1[i]
+    for i in range(env.n_error_metrics):
+        eq[f"is_error{i+1}"] = s2[i] if m in [0,1] else 0
+
+    if env.export_pred:
+        eq["pred"] = nb
     return eq
 
 
@@ -81,6 +98,10 @@ class Evaluator(object):
             return scores
         
         data_type_list = ["valid"]
+        if params.eval_data != '':
+            l = len(params.eval_data.split(','))
+            for i in range(l):
+                data_type_list.append("test"+(str(i+1) if i>0 else ""))
 
         with torch.no_grad():
             for data_type in data_type_list:
@@ -150,11 +171,14 @@ class Evaluator(object):
         n_total = torch.zeros(10000, dtype=torch.long)
         n_perfect_match = 0
         n_correct = 0
-        n_valid_d1 = 0
-        n_valid_d2 = 0
-        n_valid_d3 = 0
-        if env.operation == 'gcd':
-            n_pairs = torch.zeros((102,102), dtype=torch.long)
+        n_perfect = 0
+        if env.n_eval_metrics > 0:
+            eval_metrics = torch.zeros(self.env.n_eval_metrics)        
+        if env.n_error_metrics > 0:
+            error_metrics = torch.zeros(self.env.n_error_metrics)
+
+        if env.export_pred:
+            n_pairs = torch.zeros((env.max_class+1,env.max_class+1), dtype=torch.long)
 
         # iterator
         iterator = self.env.create_test_iterator(
@@ -248,8 +272,8 @@ class Evaluator(object):
                     tgt = idx_to_infix(env, x2[out_offset : len2[i] - 1, i].tolist(), False)
                 if valid[i]:
                     beam_log[i] = {"src": src, "tgt": tgt, "hyps": [(tgt, None, True)]}
-                    if env.operation == 'gcd':
-                        result = (nb_ops[i] % 1000) if (nb_ops[i] % 1000) < env.max_class else env.max_class
+                    if env.export_pred:
+                        result = nb_ops[i] if nb_ops[i] < env.max_class else env.max_class
                         n_pairs[result][result] += 1
 
             # stats
@@ -354,27 +378,27 @@ class Evaluator(object):
 
                 # if hypothesis is correct, and we did not find a correct one before
                 is_valid = gen["is_valid"]
-                is_valid2 = gen["is_valid2"]
-                is_valid3 = gen["is_valid3"]
-                is_valid4 = gen["is_valid4"]
                 is_b_valid = is_valid > 0
-                if env.operation == 'gcd' and not valid[i]:
-                    result = (nb_ops[i] % 1000) if (nb_ops[i] % 1000) < env.max_class else env.max_class
-                    prediction = env.max_class if (is_valid4 is None or is_valid4 > env.max_class) else is_valid4
-                    n_pairs[result][prediction] += 1
-                if is_valid > 0 and not valid[i]:
-                    n_correct += 1
-                    n_valid[nb_ops[i]] += 1
-                    valid[i] = 1
-                
                 if not valid[i]:
-                    if is_valid2 > 0:
-                        n_valid_d1 += 1
-                    if is_valid3 > 0:
-                        n_valid_d2 += 1
-                    if is_valid4 > 0:
-                        n_valid_d3 += 1
+                    if is_valid ==2:
+                        n_perfect += 1
+                    if is_valid >= 0:
+                        n_correct += 1
+                    if is_valid > 0:
+                        n_valid[nb_ops[i]] += 1
+                        valid[i] = 1
+                    for em in range(env.n_eval_metrics > 0):
+                        eval_metrics[em] += gen[f"is_valid{em+1}"]  
+                    for em in range(env.n_error_metrics > 0):
+                        error_metrics[em] += gen[f"is_error{em+1}"]  
 
+                    if env.export_pred:
+                        is_valid4 = gen["pred"]
+                        result = nb_ops[i] if nb_ops[i] < env.max_class else env.max_class
+                        prediction = env.max_class if (is_valid4 is None or is_valid4 > env.max_class) else is_valid4
+                        n_pairs[result][prediction] += 1
+
+                    
                 # update beam log
                 beam_log[i]["hyps"].append((gen["hyp"], None, is_b_valid))  # gen["score"], is_b_valid))
 
@@ -398,26 +422,23 @@ class Evaluator(object):
         _n_total = n_total.sum().item()
         logger.info(
             f"{_n_valid}/{_n_total} ({100. * _n_valid / _n_total}%) "
-            f"equations were evaluated correctly."
+            f"examples were evaluated correctly."
         )
 
         # compute perplexity and prediction accuracy
         assert _n_total == eval_size
         scores[f"{data_type}_{task}_xe_loss"] = xe_loss / _n_total
         scores[f"{data_type}_{task}_acc"] = 100.0 * _n_valid / _n_total
-        scores[f"{data_type}_{task}_perfect"] = 100.0 * n_perfect_match / _n_total
+        scores[f"{data_type}_{task}_perfect"] = 100.0 * (n_perfect_match + n_perfect) / _n_total
         scores[f"{data_type}_{task}_correct"] = (
             100.0 * (n_perfect_match + n_correct) / _n_total
         )
-        scores[f"{data_type}_{task}_acc_d1"] = (
-            100.0 * (n_perfect_match + n_valid_d1) / _n_total
-        )
-        scores[f"{data_type}_{task}_acc_d2"] = (
-            100.0 * (n_perfect_match + n_valid_d2) / _n_total
-        )
-        scores[f"{data_type}_{task}_acc_d3"] = (
-            100.0 * (n_perfect_match + n_valid_d3) / _n_total
-        )
+
+        for em in range(env.n_eval_metrics > 0):
+            scores[f"{data_type}_{task}_acc_eval{em+1}"] = 100.0*(n_perfect_match + eval_metrics[em]) / _n_total  
+        for em in range(env.n_error_metrics > 0):
+            scores[f"{data_type}_{task}_acc_error{em+1}"] = 100.0*error_metrics[em] / _n_total 
+
                         
         # per class perplexity and prediction accuracy
         for i in range(len(n_total)):
@@ -432,6 +453,12 @@ class Evaluator(object):
                     f"{e}: {n_valid[i].item()} / {n_total[i].item()} "
                     f"({100. * n_valid[i].item() / max(n_total[i].item(), 1):.2f}%)"
                 )
+        if env.export_pred:
+            logger.info(f"{data_type} predicted pairs")
+            for i in range(env.max_class+1):
+                for j in range(env.max_class+1):
+                    if n_pairs[i][j].item() >= 10:
+                        logger.info(f"{i}-{j}: {n_pairs[i][j].item()} ({100. * n_pairs[i][j].item() / n_pairs[i].sum().item():2f}%)")
 
     def enc_dec_step_beam(self, data_type, task, scores, size=None):
         """
@@ -489,10 +516,12 @@ class Evaluator(object):
         n_valid = torch.zeros(10000, dtype=torch.long)
         n_total = torch.zeros(10000, dtype=torch.long)
         n_perfect_match = 0
+        n_perfect = 0
         n_correct = 0
-        n_valid_d1 = 0
-        n_valid_d2 = 0
-        n_valid_d3 = 0
+        if env.n_eval_metrics > 0:
+            eval_metrics = torch.zeros(self.env.n_eval_metrics)        
+        if env.n_error_metrics > 0:
+            error_metrics = torch.zeros(self.env.n_error_metrics)
 
         # iterator
         iterator = env.create_test_iterator(
@@ -644,9 +673,11 @@ class Evaluator(object):
                 beam_log[i] = {"src": src, "tgt": tgt, "hyps": []}
 
                 curr_correct = 0
-                curr_d1 = 0
-                curr_d2 = 0
-                curr_d3 = 0
+                curr_perfect = 0
+                if env.n_eval_metrics > 0:
+                    curr_eval_metrics = torch.zeros(self.env.n_eval_metrics)        
+                if env.n_error_metrics > 0:
+                    curr_error_metrics = torch.zeros(self.env.n_error_metrics)
                 curr_valid = 0
         
                 # for each hypothesis
@@ -662,30 +693,27 @@ class Evaluator(object):
 
                     # if hypothesis is correct, and we did not find a correct one before
                     is_valid = gen["is_valid"]
-                    is_valid2 = gen["is_valid2"]
-                    is_valid3 = gen["is_valid3"]
-                    is_valid4 = gen["is_valid4"]
                     is_b_valid = is_valid > 0
-                    if is_valid > 0 and not valid[i]:
-                        curr_correct = 1
-                        curr_valid = 1
-
                     if not valid[i]:
-                        if is_valid2 > 0:
-                            curr_d1 = 1
-                        if is_valid3 > 0:
-                            curr_d2 = 1
-                        if is_valid4 > 0:
-                            curr_d3 = 1
+                        if is_valid ==2:
+                            curr_perfect = 1
+                        if is_valid >= 0:
+                            curr_correct = 1                
+                        if is_valid > 0:
+                            curr_valid = 1
+
+                        for em in range(env.n_eval_metrics > 0):
+                            if gen[f"is_valid{em+1}"] == 1: 
+                                curr_eval_metrics[em]=1
 
                     # update beam log
                     beam_log[i]["hyps"].append((gen["hyp"], gen["score"], is_b_valid))
 
                 if not valid[i]:
                     n_correct += curr_correct
-                    n_valid_d1 += curr_d1
-                    n_valid_d2 += curr_d2
-                    n_valid_d3 += curr_d3
+                    n_perfect += curr_perfect
+                    for em in range(env.n_eval_metrics > 0):
+                        eval_metrics[em] += curr_eval_metrics[em]
                     valid[i] = curr_valid
                     n_valid[nb_ops[i]] += curr_valid
 
@@ -715,20 +743,13 @@ class Evaluator(object):
         # compute perplexity and prediction accuracy
         assert _n_total == eval_size
         scores[f"{data_type}_{task}_xe_loss"] = xe_loss / _n_total
-        scores[f"{data_type}_{task}_beam_acc"] = 100.0 * _n_valid / _n_total
-        scores[f"{data_type}_{task}_perfect"] = 100.0 * n_perfect_match / _n_total
+        scores[f"{data_type}_{task}_acc"] = 100.0 * _n_valid / _n_total
+        scores[f"{data_type}_{task}_perfect"] = 100.0 * (n_perfect_match + n_perfect) / _n_total
         scores[f"{data_type}_{task}_correct"] = (
             100.0 * (n_perfect_match + n_correct) / _n_total
         )
-        scores[f"{data_type}_{task}_beam_acc_d1"] = (
-            100.0 * (n_perfect_match + n_valid_d1) / _n_total
-        )
-        scores[f"{data_type}_{task}_beam_acc_d2"] = (
-            100.0 * (n_perfect_match + n_valid_d2) / _n_total
-        )
-        scores[f"{data_type}_{task}_beam_acc_d3"] = (
-            100.0 * (n_perfect_match + n_valid_d3) / _n_total
-        )
+        for em in range(env.n_eval_metrics > 0):
+            scores[f"{data_type}_{task}_acc_eval{em+1}"] = 100.0*(n_perfect_match + eval_metrics[em]) / _n_total  
         
         # per class perplexity and prediction accuracy
         for i in range(len(n_total)):
@@ -739,6 +760,6 @@ class Evaluator(object):
                 f"{e}: {n_valid[i].item()} / {n_total[i].item()} "
                 f"({100. * n_valid[i].item() / max(n_total[i].item(), 1)}%)"
             )
-            scores[f"{data_type}_{task}_beam_acc_{e}"] = (
+            scores[f"{data_type}_{task}_acc_{e}"] = (
                 100.0 * n_valid[i].item() / max(n_total[i].item(), 1)
             )

@@ -32,6 +32,8 @@ class Trainer(object):
         self.params = params
         self.env = env
 
+        assert self.params.report_loss_every > 0
+
         # epoch / iteration size
         self.epoch_size = params.epoch_size
         self.total_samples = 0
@@ -216,15 +218,13 @@ class Trainer(object):
         """
         self.n_iter += 1
         self.n_total_iter += 1
-        self.print_stats()
+        if self.n_total_iter % self.params.report_loss_every == 0:
+            self.print_stats()
 
     def print_stats(self):
         """
         Print statistics about the training.
         """
-        if self.n_total_iter % 200 != 0:
-            return
-
         s_iter = "%7i - " % self.n_total_iter
         s_stat = " || ".join(
             [
@@ -246,7 +246,7 @@ class Trainer(object):
         # processing speed
         new_time = time.time()
         diff = new_time - self.last_time
-        s_speed = "{:7.2f} equations/s - {:8.2f} words/s - ".format(
+        s_speed = "{:7.2f} examples/s - {:8.2f} words/s - ".format(
             self.stats["processed_e"] * 1.0 / diff,
             self.stats["processed_w"] * 1.0 / diff,
         )
