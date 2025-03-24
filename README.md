@@ -2,7 +2,8 @@
 
 ## Integer sequence to integer sequence translator
 
-This is complete code for a sequence to sequence transformer, the goal is to train it (supervisedly) to translate short sequences of integers into short sequences of integers.
+This is complete code for a sequence to sequence transformer, the goal is to train it (supervisedly) to translate short sequences of integers into short sequences of integers. The manual can be found in Int2Int.pdf, and at https://arxiv.org/abs/2502.17513.
+Please cite the Arxiv paper (instead of this repository).
 
 ### My first experiment
 
