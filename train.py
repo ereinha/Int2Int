@@ -152,7 +152,9 @@ def get_parser():
     parser.add_argument("--act_bias", type=int, default=0,
                         help="act bias")
 
-
+    # SKANFormer
+    parser.add_argument("--sinekan", type=bool_flag, default=False,
+                        help="Use SineKANLayer as last decoder ffn")
 
     # technical parameters  float16 / AMP API
     parser.add_argument("--fp16", type=bool_flag, default=False,

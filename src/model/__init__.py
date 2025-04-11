@@ -9,7 +9,7 @@ from logging import getLogger
 import os
 import torch
 
-from .transformer import TransformerModel
+from .skanformer import TransformerModel
 from .lstm import LSTMModel
 
 
@@ -45,12 +45,20 @@ def build_modules(env, params):
                 params, env.id2word, is_encoder=False, with_output=True
             )
         else:
-            modules["encoder"] = TransformerModel(
-                params, env.id2word, is_encoder=True, with_output=False
-            )
-            modules["decoder"] = TransformerModel(
-                params, env.id2word, is_encoder=False, with_output=True
-            )
+            if params.sinekan:
+                modules["encoder"] = TransformerModel(
+                    params, env.id2word, is_encoder=True, with_output=False,
+                )
+                modules["decoder"] = TransformerModel(
+                    params, env.id2word, is_encoder=False, with_output=True, sinekan=True,
+                )
+            else:
+                modules["encoder"] = TransformerModel(
+                    params, env.id2word, is_encoder=True, with_output=False
+                )
+                modules["decoder"] = TransformerModel(
+                    params, env.id2word, is_encoder=False, with_output=True
+                )
     elif params.architecture == "encoder_only":
         modules["encoder"] = TransformerModel(
             params, env.id2word, is_encoder=True, with_output=True
