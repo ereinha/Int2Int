@@ -155,6 +155,8 @@ def get_parser():
     # SKANFormer
     parser.add_argument("--sinekan", type=bool_flag, default=False,
                         help="Use SineKANLayer as last decoder ffn")
+    parser.add_argument("--last_layer_residual", type=bool_flag, default=True,
+                        help="Use residual connection around last decoder ffn")
 
     # technical parameters  float16 / AMP API
     parser.add_argument("--fp16", type=bool_flag, default=False,

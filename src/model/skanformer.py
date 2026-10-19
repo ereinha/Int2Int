@@ -239,6 +239,7 @@ class TransformerLayer(nn.Module):
         self.is_encoder = is_encoder
         self.is_decoder = not is_encoder
         self.is_last = is_last
+        self.last_layer_residual = params.last_layer_residual
 
         # model parameters
         self.dim = params.enc_emb_dim if is_encoder else params.dec_emb_dim  # 512 by default
@@ -272,7 +273,7 @@ class TransformerLayer(nn.Module):
                 dropout=self.attention_dropout,
                 normalized_attention=params.norm_attention,
             )
-        if self.is_decoder and self.is_last:
+        if self.is_decoder and self.is_last and params.sinekan:
             self.ffn = SineKANLayer(
                 self.dim,
                 self.dim,
@@ -315,7 +316,7 @@ class TransformerLayer(nn.Module):
                 output = self.layer_norm15(output)
 
             # FFN
-            if self.is_last and self.is_decoder:
+            if self.is_last and self.is_decoder and not self.last_layer_residual:
                 output = self.ffn(output)
             else:
                 output = output + self.ffn(output)
@@ -385,7 +386,7 @@ class TransformerModel(nn.Module):
 
     STORE_OUTPUTS = False
 
-    def __init__(self, params, id2word, is_encoder, with_output, sinekan=False):
+    def __init__(self, params, id2word, is_encoder, with_output):
         """
         Transformer model (encoder or decoder).
         """
@@ -395,7 +396,6 @@ class TransformerModel(nn.Module):
         self.dtype = torch.half if params.fp16 else torch.float
         self.is_encoder = is_encoder
         self.is_decoder = not is_encoder
-        self.sinekan = sinekan
         self.with_output = with_output
         self.decoder_only = params.architecture == "decoder_only"
 
@@ -458,10 +458,7 @@ class TransformerModel(nn.Module):
             if self.act and layer_id == self.loop_idx:
                 self.layers.append(AdaptiveHalt(params, self.is_encoder, gated))
             else:
-                if self.sinekan:
-                    self.layers.append(TransformerLayer(params, self.is_encoder, gated, is_last=layer_id==self.n_layers-1))
-                else:
-                    self.layers.append(TransformerLayer(params, self.is_encoder, gated))
+                self.layers.append(TransformerLayer(params, self.is_encoder, gated, is_last=layer_id==self.n_layers-1))
         self.cache = None
 
         # output layer

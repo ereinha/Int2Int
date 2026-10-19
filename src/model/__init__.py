@@ -45,20 +45,12 @@ def build_modules(env, params):
                 params, env.id2word, is_encoder=False, with_output=True
             )
         else:
-            if params.sinekan:
-                modules["encoder"] = TransformerModel(
-                    params, env.id2word, is_encoder=True, with_output=False,
-                )
-                modules["decoder"] = TransformerModel(
-                    params, env.id2word, is_encoder=False, with_output=True, sinekan=True,
-                )
-            else:
-                modules["encoder"] = TransformerModel(
-                    params, env.id2word, is_encoder=True, with_output=False
-                )
-                modules["decoder"] = TransformerModel(
-                    params, env.id2word, is_encoder=False, with_output=True
-                )
+            modules["encoder"] = TransformerModel(
+                params, env.id2word, is_encoder=True, with_output=False
+            )
+            modules["decoder"] = TransformerModel(
+                params, env.id2word, is_encoder=False, with_output=True
+            )
     elif params.architecture == "encoder_only":
         modules["encoder"] = TransformerModel(
             params, env.id2word, is_encoder=True, with_output=True
